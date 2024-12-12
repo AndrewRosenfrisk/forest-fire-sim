@@ -1,3 +1,4 @@
+use core::fmt;
 use crossterm::{
     cursor::{Hide, MoveTo},
     execute,
@@ -9,21 +10,13 @@ use crossterm::{
     },
 };
 use rand::{thread_rng, Rng};
-use std::{
-    collections::HashMap,
-    io::stdout,
-    ops::{Add, Mul},
-    thread,
-    time::Duration,
-};
+use std::{collections::HashMap, io::stdout, thread, time::Duration};
+
 const WIDTH: u16 = 79;
 const HEIGHT: u16 = 22;
 const TREE_DENSITY: f64 = 0.2;
 const GROW_CHANCE: f64 = 0.01;
 const FIRE_CHANCE: f64 = 0.01;
-const EMPTY: &str = " ";
-const TREE: &str = "A";
-const FIRE: &str = "W";
 const PAUSE: f32 = 0.5;
 
 fn main() {
@@ -42,50 +35,47 @@ fn main() {
         .unwrap();
         display_forest(&forest);
 
-        let mut next = Forest {
-            width: forest.width,
-            height: forest.height,
-            forest: HashMap::new(),
-        };
+        let mut next = HashMap::new();
 
-        for x in 0..=forest.width {
-            for y in 0..=forest.height {
+        for x in 0..=WIDTH {
+            for y in 0..=HEIGHT {
                 let point = &Point { x, y };
-                if next.forest.contains_key(point) {
+                if next.contains_key(point) {
                     continue;
                 }
 
-                if forest.forest.contains_key(point) {
-                    let value = forest.forest.get(point).unwrap();
+                let value = forest.get(point);
 
-                    if value == EMPTY && rng.gen_bool(GROW_CHANCE) {
-                        next.forest.insert(*point, TREE.to_string());
-                    } else if value == TREE && rng.gen_bool(FIRE_CHANCE) {
-                        next.forest.insert(*point, FIRE.to_string());
-                    } else if value == FIRE {
-                        let a: i32 = -1;
-                        for ix in a..=1 {
-                            for iy in a..=1 {
-                                let nx = (x as i32).add(ix);
-                                let ny = (y as i32).add(iy);
-                                if nx >= 0 && ny >= 0 {
-                                    let neighbor = &Point {
-                                        x: nx as u16,
-                                        y: ny as u16,
-                                    };
+                if value.is_none() && rng.gen_bool(GROW_CHANCE) {
+                    next.insert(*point, Value::TREE);
+                } else if value.is_some()
+                    && *value.unwrap() == Value::TREE
+                    && rng.gen_bool(FIRE_CHANCE)
+                {
+                    next.insert(*point, Value::FIRE);
+                } else if value.is_some() && *value.unwrap() == Value::FIRE {
+                    let adjacent = &[-1, 0, 1];
+                    for ax in adjacent {
+                        for ay in adjacent {
+                            let nx = (x as i32) + ax;
+                            let ny = (y as i32) + ay;
 
-                                    if forest.forest.contains_key(neighbor)
-                                        && forest.forest.get(neighbor).unwrap() == TREE
-                                    {
-                                        next.forest.insert(*neighbor, FIRE.to_string());
-                                    }
+                            if nx >= 0 && ny >= 0 {
+                                let neighbor = &Point {
+                                    x: nx as u16,
+                                    y: ny as u16,
+                                };
+
+                                if forest.contains_key(neighbor)
+                                    && *forest.get(neighbor).unwrap() == Value::TREE
+                                {
+                                    next.insert(*neighbor, Value::FIRE);
                                 }
                             }
                         }
-                        next.forest.insert(*point, EMPTY.to_string());
-                    } else {
-                        next.forest.insert(*point, value.to_string());
                     }
+                } else if value.is_some() {
+                    next.insert(*point, *value.unwrap());
                 }
             }
         }
@@ -95,47 +85,42 @@ fn main() {
     }
 }
 
-fn new_forest() -> Forest {
+fn new_forest() -> HashMap<Point, Value> {
     let mut rng = thread_rng();
-    let mut forest: HashMap<Point, String> = HashMap::new();
+    let mut forest: HashMap<Point, Value> = HashMap::new();
     for x in 0..=WIDTH {
         for y in 0..=HEIGHT {
             if rng.gen_bool(TREE_DENSITY) {
-                forest.insert(Point { x, y }, TREE.to_string());
-            } else {
-                forest.insert(Point { x, y }, EMPTY.to_string());
+                forest.insert(Point { x, y }, Value::TREE);
             }
         }
     }
-    Forest {
-        width: WIDTH,
-        height: HEIGHT,
-        forest,
-    }
+    forest
 }
 
-fn display_forest(forest: &Forest) {
-    for y in 0..=forest.height {
-        for x in 0..=forest.width {
-            let value = forest.forest.get(&Point { x, y }).unwrap();
-            let color = match value.as_str() {
-                TREE => Color::Green,
-                FIRE => Color::Red,
-                _ => Color::White,
-            };
+fn display_forest(forest: &HashMap<Point, Value>) {
+    forest.iter().for_each(|(point, value)| {
+        let color = match value {
+            Value::TREE => Color::Green,
+            Value::FIRE => Color::Red,
+        };
+        execute!(
+            stdout(),
+            MoveTo(point.x, point.y),
+            SetForegroundColor(color),
+            Print(value)
+        )
+        .unwrap();
+    });
 
-            execute!(
-                stdout(),
-                MoveTo(x, y),
-                SetForegroundColor(color),
-                Print(value)
-            )
-            .unwrap();
-        }
-    }
-    execute!(stdout(), SetForegroundColor(Color::White)).unwrap();
-    println!("\nGrow chance: {:.0}%", (GROW_CHANCE.mul(100.0)));
-    println!("Lightning chance: {:.0}%", (FIRE_CHANCE.mul(100.0)));
+    execute!(
+        stdout(),
+        MoveTo(0, HEIGHT + 1),
+        SetForegroundColor(Color::White)
+    )
+    .unwrap();
+    println!("Grow chance: {:.0}%", (GROW_CHANCE * 100.0));
+    println!("Lightning chance: {:.0}%", (FIRE_CHANCE * 100.0));
     println!("Press Ctrl-C to quit.");
 }
 
@@ -145,8 +130,17 @@ struct Point {
     y: u16,
 }
 
-struct Forest {
-    width: u16,
-    height: u16,
-    forest: HashMap<Point, String>,
+#[derive(PartialEq, Clone, Copy)]
+enum Value {
+    TREE,
+    FIRE,
+}
+
+impl fmt::Display for Value {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Value::TREE => write!(f, "A"),
+            Value::FIRE => write!(f, "W"),
+        }
+    }
 }
